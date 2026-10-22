@@ -49,7 +49,7 @@ app.add_middleware(
 app.add_middleware(
     SessionMiddleware,
     secret_key=settings.session_secret_key,
-    https_only=False,
+    https_only=True,
     same_site="lax",
 )
 
