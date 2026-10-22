@@ -89,9 +89,10 @@ async def google_callback(
     # DEBUG: check whether session contains user_id
     print("SESSION CREATED:", dict(request.session))
     # Redirect back to React frontend
-    
+
+    # Redirect back to React frontend
     return RedirectResponse(
-        url="http://localhost:5173"
+      url=settings.frontend_url
     )
 
 @router.get("/me")

@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     # ==========================================
 
     session_secret_key: str
-    frontend_url: str = "http://localhost:5173"
+    frontend_url: str
 
     # ==========================================
     # GROQ
