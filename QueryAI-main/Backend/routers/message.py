@@ -1,3 +1,5 @@
+import os
+import tempfile
 
 from fastapi import (
     APIRouter,
@@ -8,6 +10,7 @@ from fastapi import (
     File,
     Form,
 )
+
 from sqlalchemy.orm import Session
 
 from database.connection import SessionLocal
@@ -18,9 +21,27 @@ from schemas.message import MessageResponse
 from services.llm_service import (
     generate_response,
     generate_image_response,
+    summarize_conversation,
 )
 
-from services.cloudinary_service import upload_image
+from services.cloudinary_service import (
+    upload_image,
+    upload_document,
+)
+
+from services.rag_service import (
+    generate_document_id,
+    process_document,
+    create_vector_store,
+    get_relevant_context,
+)
+
+
+# ==================================================
+# FILE SIZE LIMIT
+# ==================================================
+
+MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
 
 
 router = APIRouter(
@@ -34,10 +55,12 @@ router = APIRouter(
 # ==================================================
 
 def get_db():
+
     db = SessionLocal()
 
     try:
         yield db
+
     finally:
         db.close()
 
@@ -66,6 +89,7 @@ async def create_message(
     user_id = request.session.get("user_id")
 
     if not user_id:
+
         raise HTTPException(
             status_code=401,
             detail="User is not authenticated"
@@ -81,7 +105,9 @@ async def create_message(
         Chat.user_id == user_id
     ).first()
 
+
     if not chat:
+
         raise HTTPException(
             status_code=404,
             detail="Chat not found"
@@ -96,6 +122,8 @@ async def create_message(
     attachment_type = None
     attachment_url = None
 
+    document_id = None
+
     image_bytes = None
     content_type = None
 
@@ -106,59 +134,421 @@ async def create_message(
 
     if file is not None:
 
-        # ----------------------------------------------
-        # Currently only images are supported
-        # ----------------------------------------------
+        # --------------------------------------------------
+        # Check file size
+        # --------------------------------------------------
 
-        if (
-            not file.content_type
-            or not file.content_type.startswith("image/")
+        document_bytes = await file.read()
+
+        if len(document_bytes) > MAX_FILE_SIZE:
+
+            raise HTTPException(
+                status_code=413,
+                detail="File size cannot exceed 20 MB."
+            )
+
+
+        # --------------------------------------------------
+        # Basic file information
+        # --------------------------------------------------
+
+        content_type = file.content_type or ""
+
+        filename = file.filename or ""
+
+        filename_lower = filename.lower()
+
+
+        # ==================================================
+        # IMAGE
+        # ==================================================
+
+        if content_type.startswith("image/"):
+
+            image_bytes = document_bytes
+
+
+            # --------------------------------------------------
+            # Upload image to Cloudinary
+            # --------------------------------------------------
+
+            try:
+
+                attachment_url = upload_image(
+                    image_bytes=image_bytes,
+                    filename=filename,
+                )
+
+            except Exception as e:
+
+                print(
+                    "CLOUDINARY IMAGE ERROR:",
+                    repr(e)
+                )
+
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Image upload failed: {str(e)}"
+                )
+
+
+            # --------------------------------------------------
+            # Attachment information
+            # --------------------------------------------------
+
+            attachment_name = filename
+            attachment_type = "image"
+
+
+        # ==================================================
+        # PDF
+        # ==================================================
+
+        elif (
+            content_type == "application/pdf"
+            or filename_lower.endswith(".pdf")
         ):
+
+            attachment_type = "pdf"
+
+
+            # --------------------------------------------------
+            # Generate document ID
+            # --------------------------------------------------
+
+            document_id = generate_document_id()
+
+
+            # --------------------------------------------------
+            # Upload PDF to Cloudinary
+            # --------------------------------------------------
+
+            try:
+
+                attachment_url = upload_document(
+                    document_bytes=document_bytes,
+                    filename=filename,
+                )
+
+                print(
+                    "PDF uploaded to Cloudinary:",
+                    attachment_url
+                )
+
+            except Exception as e:
+
+                print(
+                    "CLOUDINARY PDF ERROR:",
+                    repr(e)
+                )
+
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"PDF upload failed: {str(e)}"
+                )
+
+
+            # --------------------------------------------------
+            # Create temporary PDF
+            # --------------------------------------------------
+
+            temp_file = tempfile.NamedTemporaryFile(
+                delete=False,
+                suffix=".pdf"
+            )
+
+
+            try:
+
+                temp_file.write(
+                    document_bytes
+                )
+
+                temp_file.close()
+
+
+                # --------------------------------------------------
+                # PDF → chunks
+                # --------------------------------------------------
+
+                chunks = process_document(
+                    file_path=temp_file.name,
+                    file_type="pdf"
+                )
+
+
+                print(
+                    f"PDF processed: {len(chunks)} chunks"
+                )
+
+
+                # --------------------------------------------------
+                # chunks → PostgreSQL + pgvector
+                # --------------------------------------------------
+
+                create_vector_store(
+                    chunks=chunks,
+                    document_id=document_id
+                )
+
+
+                print(
+                    f"Vector store created: {document_id}"
+                )
+
+
+            finally:
+
+                if os.path.exists(
+                    temp_file.name
+                ):
+
+                    os.remove(
+                        temp_file.name
+                    )
+
+
+            attachment_name = filename
+
+
+        # ==================================================
+        # DOCX
+        # ==================================================
+
+        elif (
+            content_type
+            == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            or filename_lower.endswith(".docx")
+        ):
+
+            attachment_type = "doc"
+
+
+            # --------------------------------------------------
+            # Generate document ID
+            # --------------------------------------------------
+
+            document_id = generate_document_id()
+
+
+            # --------------------------------------------------
+            # Upload DOCX to Cloudinary
+            # --------------------------------------------------
+
+            try:
+
+                attachment_url = upload_document(
+                    document_bytes=document_bytes,
+                    filename=filename,
+                )
+
+                print(
+                    "DOCX uploaded to Cloudinary:",
+                    attachment_url
+                )
+
+            except Exception as e:
+
+                print(
+                    "CLOUDINARY DOCX ERROR:",
+                    repr(e)
+                )
+
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"DOCX upload failed: {str(e)}"
+                )
+
+
+            # --------------------------------------------------
+            # Create temporary DOCX
+            # --------------------------------------------------
+
+            temp_file = tempfile.NamedTemporaryFile(
+                delete=False,
+                suffix=".docx"
+            )
+
+
+            try:
+
+                temp_file.write(
+                    document_bytes
+                )
+
+                temp_file.close()
+
+
+                # --------------------------------------------------
+                # DOCX → chunks
+                # --------------------------------------------------
+
+                chunks = process_document(
+                    file_path=temp_file.name,
+                    file_type="docx"
+                )
+
+
+                print(
+                    f"DOCX processed: {len(chunks)} chunks"
+                )
+
+
+                # --------------------------------------------------
+                # chunks → PostgreSQL + pgvector
+                # --------------------------------------------------
+
+                create_vector_store(
+                    chunks=chunks,
+                    document_id=document_id
+                )
+
+
+                print(
+                    f"Vector store created: {document_id}"
+                )
+
+
+            finally:
+
+                if os.path.exists(
+                    temp_file.name
+                ):
+
+                    os.remove(
+                        temp_file.name
+                    )
+
+
+            attachment_name = filename
+
+
+        # ==================================================
+        # PPTX
+        # ==================================================
+
+        elif (
+            content_type
+            == "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            or filename_lower.endswith(".pptx")
+        ):
+
+            attachment_type = "ppt"
+
+
+            # --------------------------------------------------
+            # Generate document ID
+            # --------------------------------------------------
+
+            document_id = generate_document_id()
+
+
+            # --------------------------------------------------
+            # Upload PPTX to Cloudinary
+            # --------------------------------------------------
+
+            try:
+
+                attachment_url = upload_document(
+                    document_bytes=document_bytes,
+                    filename=filename,
+                )
+
+                print(
+                    "PPTX uploaded to Cloudinary:",
+                    attachment_url
+                )
+
+            except Exception as e:
+
+                print(
+                    "CLOUDINARY PPTX ERROR:",
+                    repr(e)
+                )
+
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"PPTX upload failed: {str(e)}"
+                )
+
+
+            # --------------------------------------------------
+            # Create temporary PPTX
+            # --------------------------------------------------
+
+            temp_file = tempfile.NamedTemporaryFile(
+                delete=False,
+                suffix=".pptx"
+            )
+
+
+            try:
+
+                temp_file.write(
+                    document_bytes
+                )
+
+                temp_file.close()
+
+
+                # --------------------------------------------------
+                # PPTX → chunks
+                # --------------------------------------------------
+
+                chunks = process_document(
+                    file_path=temp_file.name,
+                    file_type="pptx"
+                )
+
+
+                print(
+                    f"PPTX processed: {len(chunks)} chunks"
+                )
+
+
+                # --------------------------------------------------
+                # chunks → PostgreSQL + pgvector
+                # --------------------------------------------------
+
+                create_vector_store(
+                    chunks=chunks,
+                    document_id=document_id
+                )
+
+
+                print(
+                    f"Vector store created: {document_id}"
+                )
+
+
+            finally:
+
+                if os.path.exists(
+                    temp_file.name
+                ):
+
+                    os.remove(
+                        temp_file.name
+                    )
+
+
+            attachment_name = filename
+
+
+        # ==================================================
+        # UNSUPPORTED FILE
+        # ==================================================
+
+        else:
+
             raise HTTPException(
                 status_code=400,
-                detail="Only image files are supported right now"
+                detail=(
+                    "Unsupported file type. "
+                    "Currently supported: "
+                    "images, PDF, DOCX and PPTX files."
+                )
             )
-
-
-        # ----------------------------------------------
-        # Read image
-        # ----------------------------------------------
-
-        image_bytes = await file.read()
-
-        content_type = file.content_type
-
-
-        # ----------------------------------------------
-        # Upload image to Cloudinary
-        # ----------------------------------------------
-
-        try:
-
-            attachment_url = upload_image(
-                image_bytes=image_bytes,
-                filename=file.filename,
-            )
-
-        except Exception as e:
-
-            print(
-                "CLOUDINARY ERROR:",
-                repr(e)
-            )
-
-            raise HTTPException(
-                status_code=500,
-                detail=f"Image upload failed: {str(e)}"
-            )
-
-
-        # ----------------------------------------------
-        # Save attachment information
-        # ----------------------------------------------
-
-        attachment_name = file.filename
-        attachment_type = "image"
 
 
     # ==================================================
@@ -166,18 +556,36 @@ async def create_message(
     # ==================================================
 
     user_message = Message(
+
         chat_id=chat_id,
+
         role="user",
 
         content=(
             content
             if content
-            else "[Image uploaded]"
+            else (
+                "[Image uploaded]"
+                if attachment_type == "image"
+                else (
+                    "[PDF uploaded]"
+                    if attachment_type == "pdf"
+                    else (
+                        "[DOCX uploaded]"
+                        if attachment_type == "doc"
+                        else "[PPTX uploaded]"
+                    )
+                )
+            )
         ),
 
         attachment_name=attachment_name,
+
         attachment_type=attachment_type,
+
         attachment_url=attachment_url,
+
+        document_id=document_id,
     )
 
 
@@ -189,7 +597,7 @@ async def create_message(
 
 
     # ==================================================
-    # 6. GET CONVERSATION HISTORY
+    # 6. GET PREVIOUS CONVERSATION
     # ==================================================
 
     previous_messages = db.query(Message).filter(
@@ -200,21 +608,21 @@ async def create_message(
 
 
     # ==================================================
-    # 7. CONVERT DATABASE MESSAGES → LLM FORMAT
+    # 7. BUILD CONTROLLED CONVERSATION MEMORY
     # ==================================================
 
-    conversation_history = []
+    all_conversation = []
+
 
     for msg in previous_messages:
 
-        # Ignore empty messages
         if not msg.content:
             continue
 
 
-        # --------------------------------------------------
-        # Convert database role to LLM role
-        # --------------------------------------------------
+        if msg.role == "summary":
+            continue
+
 
         message_role = (
             "assistant"
@@ -223,11 +631,7 @@ async def create_message(
         )
 
 
-        # --------------------------------------------------
-        # Add message to conversation history
-        # --------------------------------------------------
-
-        conversation_history.append(
+        all_conversation.append(
             {
                 "role": message_role,
                 "content": msg.content
@@ -236,18 +640,111 @@ async def create_message(
 
 
     # ==================================================
-    # 8. GENERATE AI RESPONSE
+    # 8. KEEP ONLY RECENT MESSAGES
+    # ==================================================
+
+    RECENT_MESSAGE_COUNT = 4
+
+    recent_messages = all_conversation[
+        -RECENT_MESSAGE_COUNT:
+    ]
+
+
+    # ==================================================
+    # 9. GET OLDER MESSAGES
+    # ==================================================
+
+    older_messages = all_conversation[
+        :-RECENT_MESSAGE_COUNT
+    ]
+
+
+    # ==================================================
+    # 10. CREATE SMALL SUMMARY
+    # ==================================================
+
+    conversation_history = []
+
+
+    if older_messages:
+
+        try:
+
+            summary = summarize_conversation(
+                older_messages
+            )
+
+
+            if summary:
+
+                conversation_history.append(
+                    {
+                        "role": "system",
+                        "content": (
+                            "Conversation summary:\n"
+                            f"{summary}"
+                        )
+                    }
+                )
+
+
+        except Exception as e:
+
+            print(
+                "SUMMARY ERROR:",
+                repr(e)
+            )
+
+
+    # ==================================================
+    # 11. ADD RECENT MESSAGES
+    # ==================================================
+
+    conversation_history.extend(
+        recent_messages
+    )
+
+
+    # ==================================================
+    # 12. FIND ACTIVE DOCUMENT
+    # ==================================================
+
+    active_document_id = document_id
+
+
+    if not active_document_id:
+
+        latest_document_message = db.query(
+            Message
+        ).filter(
+            Message.chat_id == chat_id,
+            Message.document_id.isnot(None)
+        ).order_by(
+            Message.created_at.desc()
+        ).first()
+
+
+        if latest_document_message:
+
+            active_document_id = (
+                latest_document_message.document_id
+            )
+
+
+    # ==================================================
+    # 13. GENERATE AI RESPONSE
     # ==================================================
 
     try:
 
         # ==================================================
-        # IMAGE MESSAGE
+        # IMAGE
         # ==================================================
 
-        if file is not None:
+        if attachment_type == "image":
 
             ai_response = generate_image_response(
+
                 user_message=(
                     content
                     if content
@@ -263,12 +760,79 @@ async def create_message(
 
 
         # ==================================================
-        # TEXT MESSAGE
+        # DOCUMENT QUESTION
+        # ==================================================
+
+        elif active_document_id and content:
+
+            # --------------------------------------------------
+            # PostgreSQL + pgvector RAG
+            # --------------------------------------------------
+
+            rag_context = get_relevant_context(
+                document_id=active_document_id,
+                query=content,
+                k=3
+            )
+
+
+            # --------------------------------------------------
+            # Grounded RAG prompt
+            # --------------------------------------------------
+
+            rag_prompt = f"""
+You are QueryAI, answering a user's question about
+their uploaded document.
+
+The uploaded document may be a PDF, DOCX, or PPTX.
+
+You MUST follow these rules:
+
+1. Answer primarily from the DOCUMENT CONTEXT.
+2. Do NOT use outside knowledge to fill missing information.
+3. Do NOT guess.
+4. Do NOT invent names, dates, locations, salaries,
+   companies, policies, or other facts.
+5. If the requested information is not supported by
+   the DOCUMENT CONTEXT, clearly say that it is not
+   specified in the provided document context.
+6. If the question refers to something discussed earlier,
+   you may use the conversation context to understand
+   what the user means.
+7. However, conversation context must NOT override
+   the uploaded document.
+8. Keep the answer clear and directly answer the question.
+
+DOCUMENT CONTEXT:
+-------------------------
+{rag_context}
+-------------------------
+
+USER QUESTION:
+{content}
+"""
+
+
+            # --------------------------------------------------
+            # Send grounded prompt to LLM
+            # --------------------------------------------------
+
+            ai_response = generate_response(
+
+                user_message=rag_prompt,
+
+                conversation_history=conversation_history,
+            )
+
+
+        # ==================================================
+        # NORMAL TEXT
         # ==================================================
 
         else:
 
             ai_response = generate_response(
+
                 user_message=content,
 
                 conversation_history=conversation_history,
@@ -277,6 +841,11 @@ async def create_message(
 
     except Exception as e:
 
+        print(
+            "LLM / RAG ERROR:",
+            repr(e)
+        )
+
         raise HTTPException(
             status_code=500,
             detail=f"LLM error: {str(e)}"
@@ -284,12 +853,15 @@ async def create_message(
 
 
     # ==================================================
-    # 9. SAVE AI RESPONSE
+    # 14. SAVE AI RESPONSE
     # ==================================================
 
     assistant_message = Message(
+
         chat_id=chat_id,
+
         role="assistant",
+
         content=ai_response
     )
 
@@ -302,7 +874,7 @@ async def create_message(
 
 
     # ==================================================
-    # 10. RETURN AI RESPONSE
+    # 15. RETURN AI RESPONSE
     # ==================================================
 
     return assistant_message
@@ -328,7 +900,9 @@ async def get_messages(
 
     user_id = request.session.get("user_id")
 
+
     if not user_id:
+
         raise HTTPException(
             status_code=401,
             detail="User is not authenticated"
@@ -344,7 +918,9 @@ async def get_messages(
         Chat.user_id == user_id
     ).first()
 
+
     if not chat:
+
         raise HTTPException(
             status_code=404,
             detail="Chat not found"

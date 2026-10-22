@@ -12,7 +12,7 @@ client = Groq(
 
 
 # ==================================================
-# TEXT RESPONSE WITH CONVERSATION HISTORY
+# TEXT RESPONSE
 # ==================================================
 
 def generate_response(
@@ -23,7 +23,7 @@ def generate_response(
     messages = []
 
     # --------------------------------------------------
-    # Add previous conversation
+    # Add controlled conversation context
     # --------------------------------------------------
 
     if conversation_history:
@@ -120,5 +120,79 @@ def generate_image_response(
         model="qwen/qwen3.8-27b",
         messages=messages,
     )
+
+    return response.choices[0].message.content
+
+
+# ==================================================
+# SUMMARIZE OLDER CONVERSATION
+# ==================================================
+
+def summarize_conversation(
+    conversation_history: list[dict]
+) -> str:
+
+    if not conversation_history:
+        return ""
+
+
+    # --------------------------------------------------
+    # Convert messages to text
+    # --------------------------------------------------
+
+    messages_text = "\n".join(
+        f"{message['role']}: {message['content']}"
+        for message in conversation_history
+    )
+
+
+    # --------------------------------------------------
+    # Safety limit
+    # --------------------------------------------------
+
+    messages_text = messages_text[-6000:]
+
+
+    # --------------------------------------------------
+    # Summary prompt
+    # --------------------------------------------------
+
+    prompt = f"""
+Summarize the following older conversation for future
+conversation context.
+
+Keep only information that may be useful later.
+
+Include:
+- Important topics discussed
+- Important questions asked
+- Important answers or conclusions
+- Important user requirements
+- Important decisions
+- Important information about uploaded documents
+
+Do NOT include unnecessary wording.
+
+Do NOT invent any information.
+
+OLDER CONVERSATION:
+
+{messages_text}
+
+Return only a short summary.
+"""
+
+
+    response = client.chat.completions.create(
+        model="openai/gpt-oss-20b",
+        messages=[
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
+        max_tokens=400,
+    )
+
 
     return response.choices[0].message.content

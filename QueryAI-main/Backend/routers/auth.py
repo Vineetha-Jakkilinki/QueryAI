@@ -86,7 +86,10 @@ async def google_callback(
     # Store logged-in user in session
     request.session["user_id"] = user.id
 
+    # DEBUG: check whether session contains user_id
+    print("SESSION CREATED:", dict(request.session))
     # Redirect back to React frontend
+    
     return RedirectResponse(
         url="http://localhost:5173"
     )

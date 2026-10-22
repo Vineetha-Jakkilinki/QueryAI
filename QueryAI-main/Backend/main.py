@@ -27,10 +27,14 @@ app = FastAPI(
 # CORS
 # ==================================================
 
+# ==================================================
+# CORS
+# ==================================================
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:5173"
+        settings.frontend_url,
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -44,7 +48,9 @@ app.add_middleware(
 
 app.add_middleware(
     SessionMiddleware,
-    secret_key=settings.session_secret_key
+    secret_key=settings.session_secret_key,
+    https_only=False,
+    same_site="lax",
 )
 
 

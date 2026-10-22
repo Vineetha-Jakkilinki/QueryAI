@@ -33,3 +33,74 @@ def upload_image(
     )
 
     return result["secure_url"]
+
+
+# ==================================================
+# UPLOAD DOCUMENT
+# ==================================================
+
+def upload_document(
+    document_bytes: bytes,
+    filename: str | None = None,
+) -> str:
+
+    if not filename:
+        filename = "document"
+
+    # --------------------------------------------------
+    # Determine extension
+    # --------------------------------------------------
+
+    extension = ""
+
+    if "." in filename:
+        extension = "." + filename.rsplit(".", 1)[1].lower()
+
+
+    # --------------------------------------------------
+    # Create temporary file
+    # --------------------------------------------------
+
+    import os
+    import tempfile
+
+    temp_file = tempfile.NamedTemporaryFile(
+        delete=False,
+        suffix=extension
+    )
+
+    try:
+
+        temp_file.write(
+            document_bytes
+        )
+
+        temp_file.close()
+
+
+        # --------------------------------------------------
+        # Upload actual file to Cloudinary
+        # --------------------------------------------------
+
+        result = cloudinary.uploader.upload(
+            temp_file.name,
+            resource_type="raw",
+            folder="queryai/documents",
+            use_filename=True,
+            unique_filename=True,
+            overwrite=False,
+        )
+
+
+        return result["secure_url"]
+
+
+    finally:
+
+        if os.path.exists(
+            temp_file.name
+        ):
+
+            os.remove(
+                temp_file.name
+            )
