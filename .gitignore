@@ -1,4 +1,24 @@
-node_modules/
-dist/
-.bolt/
+# --- Python / Backend Rules ---
+Backend/venv/
+Backend/.env
+Backend/__pycache__/
+Backend/*.pyc
+
+# --- Node / Frontend Rules ---
+Frontend/node_modules/
+Frontend/.bolt/
+Frontend/.env
+Frontend/.env.local
+
+# --- OS / IDE Rules ---
+.DS_Store
+.vscode/
+
+# --- Secrets ---
 .env
+.env.*
+!.env.example
+
+# --- Python cache ---
+__pycache__/
+*.pyc
