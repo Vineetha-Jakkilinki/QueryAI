@@ -1,8 +1,76 @@
-import { Sparkles, FileText, Image as ImageIcon, Presentation, FileType } from 'lucide-react';
-import type { Message, Attachment } from '@/types';
+import {
+  Sparkles,
+  FileText,
+  Image as ImageIcon,
+  Presentation,
+  FileType,
+  ExternalLink,
+} from 'lucide-react';
+
+import type {
+  Message,
+  Attachment,
+} from '@/types';
+
 import Markdown from './Markdown';
 
-function AttachmentChip({ att }: { att: Attachment }) {
+
+// ==================================================
+// GET OPEN URL
+// ==================================================
+
+function getAttachmentOpenUrl(
+  att: Attachment
+): string | null {
+
+  if (!att.url) {
+    return null;
+  }
+
+  // ------------------------------------------
+  // PDF / IMAGE
+  // Open directly in a new browser tab
+  // ------------------------------------------
+
+  if (
+    att.type === 'pdf' ||
+    att.type === 'image'
+  ) {
+    return att.url;
+  }
+
+
+  // ------------------------------------------
+  // DOCX / PPTX
+  // Use Microsoft Office Online Viewer
+  // ------------------------------------------
+
+  if (
+    att.type === 'doc' ||
+    att.type === 'ppt'
+  ) {
+
+    return (
+      `https://view.officeapps.live.com/op/view.aspx?src=${encodeURIComponent(
+        att.url
+      )}`
+    );
+  }
+
+
+  return att.url;
+}
+
+
+// ==================================================
+// ATTACHMENT DISPLAY
+// ==================================================
+
+function AttachmentCard({
+  att,
+}: {
+  att: Attachment;
+}) {
 
   const Icon =
     att.type === 'image'
@@ -13,87 +81,465 @@ function AttachmentChip({ att }: { att: Attachment }) {
       ? Presentation
       : FileType;
 
+
+  const openUrl =
+    getAttachmentOpenUrl(att);
+
+
   // ==================================================
-  // IMAGE ATTACHMENT
+  // IMAGE
   // ==================================================
 
-  if (att.type === 'image' && att.url) {
+  if (
+    att.type === 'image' &&
+    att.url
+  ) {
+
     return (
-      <div className="mt-2 overflow-hidden rounded-xl border border-app max-w-sm">
+      <a
+        href={openUrl ?? undefined}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="
+          mb-2
+          block
+          overflow-hidden
+          rounded-2xl
+          border
+          border-white/10
+          bg-black/10
+          max-w-sm
+          cursor-pointer
+          hover:opacity-90
+          transition
+        "
+        title="Open image"
+      >
+
         <img
           src={att.url}
           alt={att.name}
-          className="block max-w-full max-h-80 object-contain"
+          className="
+            block
+            w-full
+            max-h-80
+            object-contain
+          "
         />
 
-        <div className="flex items-center gap-1.5 px-3 py-2 bg-surface-2 text-xs text-muted">
+        <div
+          className="
+            flex
+            items-center
+            gap-2
+            px-3
+            py-2.5
+            bg-surface-2
+          "
+        >
+
           <ImageIcon
-            size={14}
-            className="text-accent"
+            size={15}
+            className="
+              text-accent
+              shrink-0
+            "
           />
 
-          <span className="truncate">
-            {att.name}
-          </span>
+          <div
+            className="
+              min-w-0
+              flex-1
+            "
+          >
+
+            <p
+              className="
+                text-xs
+                font-medium
+                text-app
+                truncate
+              "
+            >
+              {att.name}
+            </p>
+
+            <p
+              className="
+                text-[11px]
+                text-muted
+              "
+            >
+              Image • Click to open
+            </p>
+
+          </div>
+
+          <ExternalLink
+            size={14}
+            className="
+              text-muted
+              shrink-0
+            "
+          />
+
         </div>
-      </div>
+
+      </a>
     );
   }
 
+
   // ==================================================
-  // OTHER ATTACHMENTS
+  // FILE CARD
+  // ==================================================
+
+  const fileCard = (
+    <div
+      className="
+        flex
+        items-center
+        gap-3
+        px-3
+        py-3
+        rounded-xl
+        bg-surface-2
+        border
+        border-app
+        max-w-sm
+      "
+    >
+
+      {/* FILE ICON */}
+
+      <div
+        className="
+          shrink-0
+          w-10
+          h-10
+          rounded-lg
+          bg-app
+          border
+          border-app
+          flex
+          items-center
+          justify-center
+        "
+      >
+
+        <Icon
+          size={20}
+          className="text-accent"
+        />
+
+      </div>
+
+
+      {/* FILE INFORMATION */}
+
+      <div
+        className="
+          min-w-0
+          flex-1
+        "
+      >
+
+        <p
+          className="
+            text-sm
+            font-medium
+            text-app
+            truncate
+          "
+        >
+          {att.name}
+        </p>
+
+
+        <p
+          className="
+            text-xs
+            text-muted
+            mt-0.5
+          "
+        >
+
+          {att.type === 'pdf'
+            ? 'PDF • Click to open'
+            : att.type === 'ppt'
+            ? 'PowerPoint • Click to open'
+            : 'Document • Click to open'}
+
+        </p>
+
+      </div>
+
+
+      {/* OPEN ICON */}
+
+      {att.url && (
+
+        <ExternalLink
+          size={16}
+          className="
+            text-muted
+            shrink-0
+          "
+        />
+
+      )}
+
+    </div>
+  );
+
+
+  // ==================================================
+  // FILE WITH URL
+  // ==================================================
+
+  if (
+    att.url &&
+    openUrl
+  ) {
+
+    return (
+      <a
+        href={openUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="
+          mb-2
+          block
+          cursor-pointer
+          hover:opacity-90
+          transition
+        "
+        title={
+          att.type === 'pdf'
+            ? 'Open PDF'
+            : att.type === 'ppt'
+            ? 'Open PowerPoint'
+            : att.type === 'doc'
+            ? 'Open document'
+            : 'Open attachment'
+        }
+      >
+
+        {fileCard}
+
+      </a>
+    );
+  }
+
+
+  // ==================================================
+  // FILE WITHOUT URL
   // ==================================================
 
   return (
-    <div className="flex items-center gap-1.5 mt-2 px-2.5 py-1.5 rounded-md bg-surface-2 border border-app text-xs text-muted">
-
-      <Icon
-        size={14}
-        className="text-accent"
-      />
-
-      <span className="truncate max-w-[180px]">
-        {att.name}
-      </span>
-
+    <div className="mb-2">
+      {fileCard}
     </div>
   );
 }
 
-export default function MessageBubble({ message }: { message: Message }) {
-  const isUser = message.role === 'user';
+
+// ==================================================
+// MESSAGE BUBBLE
+// ==================================================
+
+export default function MessageBubble({
+  message,
+}: {
+  message: Message;
+}) {
+
+  const isUser =
+    message.role === 'user';
+
+
   return (
-    <div className={`flex gap-3 animate-fade-in-up ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
-      {/* Avatar */}
-      <div className="shrink-0 mt-0.5">
+
+    <div
+      className={`
+        flex
+        gap-3
+        animate-fade-in-up
+        ${
+          isUser
+            ? 'flex-row-reverse'
+            : 'flex-row'
+        }
+      `}
+    >
+
+      {/* =========================================
+          AVATAR
+      ========================================= */}
+
+      <div
+        className="
+          shrink-0
+          mt-0.5
+        "
+      >
+
         {isUser ? (
-          <div className="w-8 h-8 rounded-full bg-surface-2 border border-app flex items-center justify-center text-xs font-medium text-muted">
+
+          <div
+            className="
+              w-8
+              h-8
+              rounded-full
+              bg-surface-2
+              border
+              border-app
+              flex
+              items-center
+              justify-center
+              text-xs
+              font-medium
+              text-muted
+            "
+          >
             U
           </div>
+
         ) : (
-          <div className="w-8 h-8 rounded-lg bg-accent flex items-center justify-center">
-            <Sparkles size={16} className="text-white" strokeWidth={2.5} />
+
+          <div
+            className="
+              w-8
+              h-8
+              rounded-lg
+              bg-accent
+              flex
+              items-center
+              justify-center
+            "
+          >
+
+            <Sparkles
+              size={16}
+              className="text-white"
+              strokeWidth={2.5}
+            />
+
           </div>
+
         )}
+
       </div>
 
-      {/* Bubble */}
-      <div className={`max-w-[80%] ${isUser ? 'items-end' : 'items-start'} flex flex-col`}>
-        <div
-          className={
+
+      {/* =========================================
+          MESSAGE CONTENT
+      ========================================= */}
+
+      <div
+        className={`
+          max-w-[80%]
+          ${
             isUser
-              ? 'px-4 py-2.5 rounded-2xl rounded-tr-sm bg-accent text-white text-sm leading-relaxed'
-              : 'px-4 py-3 rounded-2xl rounded-tl-sm bg-surface border border-app text-app text-sm leading-relaxed'
+              ? 'items-end'
+              : 'items-start'
           }
-        >
-          {isUser ? <p className="whitespace-pre-wrap">{message.content}</p> : <Markdown content={message.content} />}
-        </div>
-        {message.attachments && message.attachments.length > 0 && (
-          <div className="flex flex-wrap gap-2">
-            {message.attachments.map((a) => <AttachmentChip key={a.id} att={a} />)}
+          flex
+          flex-col
+        `}
+      >
+
+        {/* =====================================
+            USER MESSAGE
+        ===================================== */}
+
+        {isUser ? (
+
+          <div
+            className="
+              px-3
+              py-3
+              rounded-2xl
+              rounded-tr-sm
+              bg-accent
+              text-white
+              text-sm
+              leading-relaxed
+            "
+          >
+
+            {/* ATTACHMENTS */}
+
+            {message.attachments &&
+              message.attachments.length > 0 && (
+
+                <div className="mb-2">
+
+                  {message.attachments.map(
+                    (attachment) => (
+
+                      <AttachmentCard
+                        key={attachment.id}
+                        att={attachment}
+                      />
+
+                    )
+                  )}
+
+                </div>
+
+              )}
+
+
+            {/* TEXT */}
+
+            {message.content && (
+
+              <p
+                className="
+                  whitespace-pre-wrap
+                "
+              >
+                {message.content}
+              </p>
+
+            )}
+
           </div>
+
+        ) : (
+
+          /* =====================================
+             ASSISTANT MESSAGE
+          ===================================== */
+
+          <div
+            className="
+              px-4
+              py-3
+              rounded-2xl
+              rounded-tl-sm
+              bg-surface
+              border
+              border-app
+              text-app
+              text-sm
+              leading-relaxed
+            "
+          >
+
+            <Markdown
+              content={
+                message.content
+              }
+            />
+
+          </div>
+
         )}
+
       </div>
+
     </div>
   );
 }
