@@ -1,3 +1,4 @@
+
 import os
 import uuid
 
@@ -38,9 +39,28 @@ if not DATABASE_URL:
 # EMBEDDING MODEL
 # ==================================================
 
-embedding_model = HuggingFaceEmbeddings(
-    model_name="sentence-transformers/all-MiniLM-L6-v2"
-)
+_embedding_model = None
+
+
+def get_embedding_model():
+
+    global _embedding_model
+
+    if _embedding_model is None:
+
+        print(
+            "Loading HuggingFace embedding model..."
+        )
+
+        _embedding_model = HuggingFaceEmbeddings(
+            model_name="sentence-transformers/all-MiniLM-L6-v2"
+        )
+
+        print(
+            "HuggingFace embedding model loaded."
+        )
+
+    return _embedding_model
 
 
 # ==================================================
@@ -192,6 +212,8 @@ def create_vector_store(
     # 2. CREATE EMBEDDINGS
     # ==================================================
 
+    embedding_model = get_embedding_model()
+
     embeddings = embedding_model.embed_documents(
         texts
     )
@@ -304,11 +326,14 @@ class NeonVectorStore:
         # 1. CREATE QUERY EMBEDDING
         # ==================================================
 
+        embedding_model = get_embedding_model()
+
         query_embedding = (
             embedding_model.embed_query(
                 query
             )
         )
+
 
         # ==================================================
         # 2. CONNECT TO NEON
