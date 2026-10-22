@@ -22,3 +22,9 @@ Frontend/.env.local
 # --- Python cache ---
 __pycache__/
 *.pyc
+
+# Python virtual environments and cache
+venv/
+.venv/
+**/__pycache__/
+*.py[cod]
